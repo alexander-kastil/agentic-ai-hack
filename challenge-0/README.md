@@ -43,11 +43,7 @@ azd up
 
 - Replace `<environment-name>` with a friendly name (for example, `hackathon`).
 - The `azd env new` command seeds environment configuration and prompts for the subscription and resource group name. The default location (`swedencentral`) aligns with the template.
-- If you need to grant an additional service principal access to the Azure AI Foundry resources, set the optional parameter before running `azd up`:
-
-```powershell
-azd env set SERVICE_PRINCIPAL_OBJECT_ID <principal-object-id>
-```
+- Create a new resource group when prompted (for example, `rg-aihackaton-<abc>` where `abc` are the first three letters of your last name).
 
 The deployment usually completes within 10 minutes and creates all dependent role assignments automatically. If the deployment fails due to a missing resource provider (for example, `Microsoft.AlertsManagement`), register it and re-run `azd up`.
 

@@ -5,14 +5,13 @@
         "ghcr.io/devcontainers/features/azure-cli:1": {
             "installBicep": true
         },
-        "ghcr.io/devcontainers/features/azure-dev-cli:1": {},
         "ghcr.io/jlaundry/devcontainer-features/azure-functions-core-tools:1": {},
         "ghcr.io/devcontainers/features/docker-in-docker:2": {
             "version": "latest",
             "enableNonRootDocker": "true"
         }
     },
-    "postCreateCommand": "pip3 install --user -r requirements.txt",
+    "postCreateCommand": "pip3 install --user -r requirements.txt && curl -fsSL https://aka.ms/install-azd.sh | bash",
     "customizations": {
         "vscode": {
             "extensions": [
