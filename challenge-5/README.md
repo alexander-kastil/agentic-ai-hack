@@ -92,8 +92,10 @@ Response body (application/json):
    1. **Install required packages**: Before running the application, install the Microsoft Agent Framework and required dependencies:
 
    ```bash
-   pip install azure-identity agent-framework
+   pip install azure-identity agent-framework --pre
    ```
+   
+   Note: The `--pre` flag is required as Microsoft Agent Framework is currently in preview.
 
    2. **Configure environment variables**: Add the following environment variables to your `.env` file or set them in your shell environment:
 
@@ -101,6 +103,7 @@ Response body (application/json):
    AZURE_OPENAI_ENDPOINT=""
    AZURE_OPENAI_KEY=""
    AZURE_OPENAI_DEPLOYMENT_NAME=""
+   AZURE_OPENAI_API_VERSION="2024-10-01-preview"
    COSMOS_ENDPOINT=""
    COSMOS_KEY=""
    ```
