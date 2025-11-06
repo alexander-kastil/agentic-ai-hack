@@ -9,7 +9,7 @@ import os
 import json
 import re
 
-from agents.tools import CosmosDBPlugin
+from agents.cosmos_tools import get_document_by_claim_id
 from dotenv import load_dotenv
 
 load_dotenv(override=True)  
@@ -26,10 +26,6 @@ async def get_specialized_agents() -> Dict[str, Any]:
     """Get our specialized insurance processing agents using Microsoft Agent Framework."""
     
     print("🔧 Creating specialized insurance agents...")
-
-    # Create Cosmos DB plugin instances for different agents
-    cosmos_plugin_claims = CosmosDBPlugin()
-    cosmos_plugin_risk = CosmosDBPlugin()
     
     # Get environment variables
     # Try to use DefaultAzureCredential first, fall back to AzureCliCredential
@@ -47,7 +43,7 @@ async def get_specialized_agents() -> Dict[str, Any]:
     claim_reviewer_agent = chat_client.create_agent(
         instructions="""You are an expert Insurance Claim Reviewer Agent specialized in analyzing and validating insurance claims. 
         Your primary responsibilities include:
-        1. Use the Cosmos DB plugin to retrieve claim data by claim_id, then:
+        1. Use the get_document_by_claim_id function to retrieve claim data by claim_id, then:
         2. Review all claim details (dates, amounts, descriptions).
         3. Verify completeness of documentation and supporting evidence.
         4. Analyze damage assessments and cost estimates for reasonableness.
@@ -60,6 +56,7 @@ async def get_specialized_agents() -> Dict[str, Any]:
         Next Steps: Clear, actionable recommendations
         """,
         name="ClaimReviewer",
+        tools=[get_document_by_claim_id]
     )
 
     # Create Risk Analyzer Agent with Cosmos DB access
@@ -74,7 +71,7 @@ async def get_specialized_agents() -> Dict[str, Any]:
         - Recommend follow-up actions if warranted
 
         Assessment Guidelines:
-        - Use the Cosmos DB plugin to access claim records
+        - Use the get_document_by_claim_id function to access claim records
         - Look for unusual timing, inconsistent descriptions, irregular amounts, or clustering
         - Check for repeat claim behavior or geographic overlaps
         - Assess the overall risk profile of each claim
@@ -87,6 +84,7 @@ async def get_specialized_agents() -> Dict[str, Any]:
         - Recommendation: Investigate / Monitor / No action needed
         """,
         name="RiskAnalyzer",
+        tools=[get_document_by_claim_id]
     )
 
     # Create Policy Checker Agent
@@ -205,9 +203,9 @@ Each agent must use their tools to retrieve and analyze actual data.
 
 Provide your decision as a JSON object with 'decision' (APPROVED or DENIED) and 'justification' fields."""
         
-        # Run the approver agent separately
-        approver_agent = agents['approver']
-        approver_events = await workflow.run(approver_task)  # Simple run with single agent
+        # Create a separate workflow for the approver agent
+        approver_workflow = ConcurrentBuilder().participants([agents['approver']]).build()
+        approver_events = await approver_workflow.run(approver_task)
         
         # Get approver result
         approver_outputs = approver_events.get_outputs()
