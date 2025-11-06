@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Dict, Any, List
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, AzureCliCredential
 from agent_framework import ChatMessage, ConcurrentBuilder
 from agent_framework.azure import AzureOpenAIChatClient
 import asyncio
@@ -32,22 +32,19 @@ async def get_specialized_agents() -> Dict[str, Any]:
     cosmos_plugin_risk = CosmosDBPlugin()
     
     # Get environment variables
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-    api_key = os.environ.get("AZURE_OPENAI_KEY")
-    deployment_name = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4")
+    # Try to use DefaultAzureCredential first, fall back to AzureCliCredential
+    try:
+        credential = DefaultAzureCredential()
+    except:
+        credential = AzureCliCredential()
     
     # Create Azure OpenAI chat client
-    chat_client = AzureOpenAIChatClient(
-        endpoint=endpoint,
-        api_key=api_key,
-        api_version="2024-10-01-preview"
-    )
+    # Agent Framework uses environment variables or explicit configuration
+    chat_client = AzureOpenAIChatClient(credential=credential)
     
     # Create Claim Reviewer Agent with Cosmos DB access
     print("🔍 Creating Claim Reviewer Agent...")
     claim_reviewer_agent = chat_client.create_agent(
-        model=deployment_name,
-        name="ClaimReviewer",
         instructions="""You are an expert Insurance Claim Reviewer Agent specialized in analyzing and validating insurance claims. 
         Your primary responsibilities include:
         1. Use the Cosmos DB plugin to retrieve claim data by claim_id, then:
@@ -62,14 +59,12 @@ async def get_specialized_agents() -> Dict[str, Any]:
         A short paragraph description if the CLAIM STATUS is: VALID / QUESTIONABLE / INVALID ; Analysis: Summary of findings by component; Any missing Info / Concerns: List of issues or gaps;
         Next Steps: Clear, actionable recommendations
         """,
-        tools=[cosmos_plugin_claims]
+        name="ClaimReviewer",
     )
 
     # Create Risk Analyzer Agent with Cosmos DB access
     print("⚠️ Creating Risk Analyzer Agent...")
     risk_analyzer_agent = chat_client.create_agent(
-        model=deployment_name,
-        name="RiskAnalyzer",
         instructions="""You are the Risk Analysis Agent. Your role is to evaluate the authenticity of insurance claims and detect potential fraud using available claim data.
         Core Functions:
         - Analyze historical and current claim data
@@ -91,14 +86,12 @@ async def get_specialized_agents() -> Dict[str, Any]:
         - Risk Score: 1–10 scale
         - Recommendation: Investigate / Monitor / No action needed
         """,
-        tools=[cosmos_plugin_risk]
+        name="RiskAnalyzer",
     )
 
     # Create Policy Checker Agent
     print("📋 Creating Policy Checker Agent...")
     policy_checker_agent = chat_client.create_agent(
-        model=deployment_name,
-        name="PolicyChecker",
         instructions="""You are the Policy Checker Agent.
 
         Your task is to summarize a policy based on policy number.
@@ -113,21 +106,21 @@ async def get_specialized_agents() -> Dict[str, Any]:
         - Policy Number: [Policy number]
         - Main important details
         - Reference and quote specific policy sections that support your determination.
-        """
+        """,
+        name="PolicyChecker",
     )
     
     # Create Approver Agent for final decision
     print("✅ Creating Approver Agent...")
     approver_agent = chat_client.create_agent(
-        model=deployment_name,
-        name="ApproverAgent",
         instructions="""You must analyze and process insurance claims based on the information provided by specialized agents.
         You will provide a final decision on whether to approve or deny the claim, along with a detailed justification. 
         Your decision must be based on the specific findings and assessments from the Claim Reviewer, Risk Analyzer, and Policy Checker agents. 
         You must only approve if the claim is valid, risk is low or medium, and the policy covers the claim.
         Say 'APPROVED' or 'DENIED' followed by your reasoning.
         Format your response as a JSON object with 'decision' and 'justification' fields.
-        """
+        """,
+        name="ApproverAgent",
     )
 
     agents = {
@@ -181,19 +174,24 @@ Policy Checker Agent:
 Each agent must use their tools to retrieve and analyze actual data.
 """
         
-        # Create messages for concurrent workflow
-        messages = [ChatMessage(role="user", text=task)]
-        
         # Run concurrent orchestration
         print(f"\n🔄 Invoking concurrent orchestration...")
-        run = await workflow.run(messages)
+        events = await workflow.run(task)
+        
+        # Get outputs from the workflow
+        outputs = events.get_outputs()
         
         # Collect results from all agents
         results = []
-        for event in run.events():
-            if event.is_output:
-                results.append(event.output)
-                print(f"# Agent Response\n{event.output}")
+        if outputs:
+            for output in outputs:
+                # Output is a list of ChatMessage objects
+                messages = output if isinstance(output, list) else [output]
+                for msg in messages:
+                    if hasattr(msg, 'text') and msg.text:
+                        results.append(msg.text)
+                        author = getattr(msg, 'author_name', 'Agent')
+                        print(f"# {author} Response\n{msg.text}")
         
         # Now have the approver agent make final decision based on all analyses
         print(f"\n✅ Concurrent analysis complete. Running approver agent...")
@@ -208,26 +206,27 @@ Each agent must use their tools to retrieve and analyze actual data.
 Provide your decision as a JSON object with 'decision' (APPROVED or DENIED) and 'justification' fields."""
         
         # Run the approver agent separately
-        approver_messages = [ChatMessage(role="user", text=approver_task)]
         approver_agent = agents['approver']
+        approver_events = await workflow.run(approver_task)  # Simple run with single agent
         
-        # Since approver is a single agent, we can invoke it directly
-        # For simplicity, we'll use the chat client to get a response
-        chat_client = agents['chat_client']
-        
-        # Get final decision from approver
-        # Note: Agent Framework agents may need different invocation pattern
-        # This is a simplified approach - in production, you'd want proper agent invocation
-        approver_result = await chat_client.complete(
-            messages=approver_messages,
-            agent=approver_agent
-        )
+        # Get approver result
+        approver_outputs = approver_events.get_outputs()
+        approver_result = None
+        if approver_outputs:
+            for output in approver_outputs:
+                messages = output if isinstance(output, list) else [output]
+                for msg in messages:
+                    if hasattr(msg, 'text') and msg.text:
+                        approver_result = msg.text
+                        break
 
         print(f"\n✅ Insurance Claim Orchestration Complete!")
-        return approver_result
+        return approver_result if approver_result else all_analyses
         
     except Exception as e:
         print(f"❌ Error during orchestration: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise
 
 def _normalize_orchestration_result(result: Any) -> Dict[str, Any]:
