@@ -31,7 +31,8 @@ async def get_specialized_agents() -> Dict[str, Any]:
     # Try to use DefaultAzureCredential first, fall back to AzureCliCredential
     try:
         credential = DefaultAzureCredential()
-    except:
+    except Exception as e:
+        print(f"⚠️  DefaultAzureCredential failed: {str(e)}, falling back to AzureCliCredential")
         credential = AzureCliCredential()
     
     # Create Azure OpenAI chat client
